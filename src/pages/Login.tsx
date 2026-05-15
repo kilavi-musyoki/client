@@ -22,7 +22,7 @@ export default function Login() {
     const ok = await login(email, password)
     setLoading(false)
     if (ok) navigate('/')
-    else setError('Invalid email or password. Try demo@cyberpath.io / demo123')
+    else setError('Invalid email or password.')
   }
 
   return (
@@ -138,7 +138,7 @@ export default function Login() {
 
           <div className="mt-6 p-3.5 rounded-lg bg-[var(--color-brand-50)] border border-[var(--color-brand-100)]">
             <p className="text-xs text-[var(--color-brand-700)] font-medium mb-1">Demo credentials</p>
-            <p className="text-xs text-[var(--color-brand-600)] font-mono">demo@cyberpath.io / demo123</p>
+            <p className="text-xs text-[var(--color-brand-600)] font-mono">demo@cyberpath.io / (See .env)</p>
           </div>
         </div>
       </div>

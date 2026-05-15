@@ -16,47 +16,71 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-// Mock credentials — replace with real backend in Phase 2.
-// Bug fix: read from env vars so passwords don't ship as plaintext in source.
-// Fallback values keep the app working locally without a .env file.
-const MOCK_USERS = [
-  { id: '1', name: 'Guest User',  email: 'demo@cyberpath.io', avatar: 'GU',
-    password: import.meta.env.VITE_DEMO_PASSWORD ?? 'demo123' },
-  { id: '2', name: 'Alex Morgan', email: 'alex@cyberpath.io', avatar: 'AM',
-    password: import.meta.env.VITE_ALEX_PASSWORD ?? 'alex123' },
-]
+// Credentials and authentication logic have been securely moved to the backend.
+
+const AUTO_USER = { id: 'auto', name: 'Learner', email: 'demo@cyberpath.io', avatar: 'LN' }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const stored = localStorage.getItem('cyberpath_user')
-    if (stored) {
-      try { setUser(JSON.parse(stored)) } catch { /* ignore */ }
+    // Bug fix: use sessionStorage and only store opaque IDs, not sensitive PII
+    const sessionId = sessionStorage.getItem('cyberpath_session')
+    if (sessionId) {
+      if (sessionId === 'auto') {
+        setUser(AUTO_USER)
+        setIsLoading(false)
+      } else {
+        // Fetch user securely from backend API
+        fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${sessionId}` }
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.user) {
+              setUser(data.user)
+            } else {
+              sessionStorage.removeItem('cyberpath_session')
+            }
+          })
+          .catch(console.error)
+          .finally(() => setIsLoading(false))
+      }
     } else {
       // Auto-login: users arriving from the LMS have no session yet.
-      // Silently log them in as a generic learner so no second login is needed.
-      const autoUser = { id: 'auto', name: 'Learner', email: 'demo@cyberpath.io', avatar: 'LN' }
-      localStorage.setItem('cyberpath_user', JSON.stringify(autoUser))
-      setUser(autoUser)
+      sessionStorage.setItem('cyberpath_session', 'auto')
+      setUser(AUTO_USER)
+      setIsLoading(false)
     }
-    setIsLoading(false)
+    // Clean up old insecure storage
+    localStorage.removeItem('cyberpath_user')
   }, [])
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    await new Promise(r => setTimeout(r, 800)) // simulate network
-    const match = MOCK_USERS.find(u => u.email === email && u.password === password)
-    if (!match) return false
-    const { password: _, ...userData } = match
-    setUser(userData)
-    localStorage.setItem('cyberpath_user', JSON.stringify(userData))
-    return true
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      })
+      const data = await res.json()
+      
+      if (data.success && data.user) {
+        setUser(data.user)
+        sessionStorage.setItem('cyberpath_session', data.user.id)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('Login failed:', error)
+      return false
+    }
   }
 
   const logout = () => {
     setUser(null)
-    localStorage.removeItem('cyberpath_user')
+    sessionStorage.removeItem('cyberpath_session')
   }
 
   return (
