@@ -18,7 +18,19 @@ const AuthContext = createContext<AuthContextType | null>(null)
 
 // Credentials and authentication logic have been securely moved to the backend.
 
-const AUTO_USER = { id: 'auto', name: 'Learner', email: 'demo@cyberpath.io', avatar: 'LN' }
+const DEFAULT_AUTO_USER: User = { id: 'auto', name: 'Learner', email: 'demo@cyberpath.io', avatar: 'LN' }
+
+/** Build an auto-login user from URL query params (?name=...&email=...).
+ *  Falls back to the generic Learner identity when no params are present.
+ *  This lets LMS admins pass real learner identity without any code changes —
+ *  just append params to the CyberPath URL in the LMS course link. */
+function buildAutoUser(): User {
+  const params = new URLSearchParams(window.location.search)
+  const name  = params.get('name')?.trim()  || DEFAULT_AUTO_USER.name
+  const email = params.get('email')?.trim() || DEFAULT_AUTO_USER.email
+  const initials = name.split(' ').map(w => w[0]?.toUpperCase() ?? '').join('').slice(0, 2) || 'LN'
+  return { id: 'auto', name, email, avatar: initials }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -29,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const sessionId = sessionStorage.getItem('cyberpath_session')
     if (sessionId) {
       if (sessionId === 'auto') {
-        setUser(AUTO_USER)
+        setUser(buildAutoUser())
         setIsLoading(false)
       } else {
         // Fetch user securely from backend API
@@ -50,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       // Auto-login: users arriving from the LMS have no session yet.
       sessionStorage.setItem('cyberpath_session', 'auto')
-      setUser(AUTO_USER)
+      setUser(buildAutoUser())
       setIsLoading(false)
     }
     // Clean up old insecure storage
@@ -66,9 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       const data = await res.json()
       
-      if (data.success && data.user) {
+      if (data.success && data.user && data.token) {
         setUser(data.user)
-        sessionStorage.setItem('cyberpath_session', data.user.id)
+        // Store the cryptographic token — NOT the predictable user ID
+        sessionStorage.setItem('cyberpath_session', data.token)
         return true
       }
       return false

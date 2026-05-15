@@ -1,10 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { useAuth } from '../../context/AuthContext'
 import { CheckCircle, Trophy, Star, ArrowLeft } from 'lucide-react'
 
-// Replace with your deployed Apps Script webhook URL.
-// Set VITE_WEBHOOK_URL in your .env / Vercel environment variables
-// so the real URL never ships as plaintext in source control.
-const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL ?? ''
+// The webhook URL is now a server-only env var (no VITE_ prefix).
+// Completion data is sent to /api/complete which proxies to the real webhook.
+// This ensures the Google Apps Script URL never ships in the client bundle.
 
 interface Props {
   isVisible: boolean
@@ -14,35 +14,48 @@ interface Props {
 }
 
 export default function CompletionModal({ isVisible, chapter, prog, onClose }: Props) {
+  const { user } = useAuth()
   const score = prog.totalScore ?? 60
   const grade = score >= 55 ? 'S' : score >= 45 ? 'A' : score >= 30 ? 'B' : 'C'
   const gradeColor = grade === 'S' ? 'text-amber-500' : grade === 'A' ? 'text-[var(--color-brand-500)]'
     : grade === 'B' ? 'text-emerald-500' : 'text-slate-400'
 
+  // Guard: ensure the webhook fires at most once per modal lifetime AND
+  // at most once per chapter across revisits (persisted in localStorage).
+  // Prevents duplicates from React 18 Strict Mode (double-effect in dev),
+  // users re-triggering the completion modal, and repeat visits to a
+  // completed chapter.
+  const webhookSent = useRef(false)
+
   // ── Google Sheet completion webhook ────────────────────────────────────────
-  // Fires once when the modal becomes visible. Silently posts learner data to
-  // the Apps Script endpoint which appends a row to the tracking spreadsheet.
+  // Fires once when the modal becomes visible. Posts learner data to the
+  // server-side proxy at /api/complete, which forwards to the Apps Script
+  // endpoint. The real webhook URL never reaches the client.
   // The .catch(() => {}) ensures any network failure is swallowed — it must
   // never crash the modal or block the learner from seeing their result.
   useEffect(() => {
-    if (!isVisible || !WEBHOOK_URL) return
+    if (!isVisible || webhookSent.current) return
 
-    const user = (() => {
-      try { return JSON.parse(localStorage.getItem('cyberpath_user') || '{}') }
-      catch { return {} }
-    })()
+    // Idempotency: check if this chapter's completion was already reported
+    const storageKey = `cyberpath_completed_${chapter.code}`
+    if (localStorage.getItem(storageKey)) return
 
-    fetch(WEBHOOK_URL, {
+    webhookSent.current = true
+
+    fetch('/api/complete', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name:    user.name  || 'Learner',
-        email:   user.email || 'unknown',
+        name:    user?.name  || 'Learner',
+        email:   user?.email || 'unknown',
         chapter: `${chapter.code} — ${chapter.title}`,
         score,
         grade,
         date:    new Date().toLocaleDateString(),
       }),
-    }).catch(() => {})
+    })
+      .then(() => localStorage.setItem(storageKey, new Date().toISOString()))
+      .catch(() => {})
   }, [isVisible]) // eslint-disable-line react-hooks/exhaustive-deps
   // ──────────────────────────────────────────────────────────────────────────
 
